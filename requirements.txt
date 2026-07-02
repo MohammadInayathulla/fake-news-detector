@@ -1,0 +1,12 @@
+streamlit
+groq
+lime
+sentence-transformers
+torch
+torchvision
+scikit-learn
+joblib
+numpy
+pandas
+plotly
+Pillow

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Model files (large)
+*.pkl
+*.h5
+*.pt
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Streamlit
+.streamlit/
