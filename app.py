@@ -6,6 +6,7 @@ import joblib
 import numpy as np
 from PIL import Image
 import re
+import os
 import pandas as pd
 import plotly.express as px
 
@@ -28,7 +29,6 @@ st_model = SentenceTransformer('all-MiniLM-L6-v2')
 TEXT_DIM = 384
 
 # --- Groq ---
-import os
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 groq_client = Groq(api_key=GROQ_API_KEY)
 
@@ -210,6 +210,7 @@ if st.button("🔍 Analyze", use_container_width=True):
         st.stop()
 
     cleaned = clean_text_simple(text)
+    word_weights = []  # safe default in case LIME fails
     text_vec = st_model.encode([cleaned])
 
     if upload:
@@ -257,79 +258,86 @@ if st.button("🔍 Analyze", use_container_width=True):
         combined = np.concatenate([text_vecs, img_vecs], axis=1)
         return model.predict_proba(combined)
 
-    with st.spinner("Generating word-level explanation (~15 seconds)..."):
-        exp = lime_explainer.explain_instance(
-            cleaned,
-            predict_for_lime,
-            num_features=10,
-            num_samples=300
-        )
+    try:
+        with st.spinner("Generating word-level explanation (~15 seconds)..."):
+            exp = lime_explainer.explain_instance(
+                cleaned,
+                predict_for_lime,
+                num_features=10,
+                num_samples=300
+            )
 
-    word_weights = exp.as_list()
-    fake_words = [(w, v) for w, v in word_weights if v > 0]
-    real_words = [(w, v) for w, v in word_weights if v < 0]
+        word_weights = exp.as_list()
+        fake_words = [(w, v) for w, v in word_weights if v > 0]
+        real_words = [(w, v) for w, v in word_weights if v < 0]
 
-    col_fake, col_real = st.columns(2)
+        col_fake, col_real = st.columns(2)
 
-    with col_fake:
-        st.markdown("##### 🔴 Words pushing toward FAKE")
-        if fake_words:
-            fig = go.Figure(go.Bar(
-                x=[v for _, v in fake_words],
-                y=[w for w, _ in fake_words],
-                orientation='h',
-                marker_color='#e63946'
-            ))
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=10), xaxis_title="Weight")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No strong FAKE word indicators found.")
+        with col_fake:
+            st.markdown("##### 🔴 Words pushing toward FAKE")
+            if fake_words:
+                fig = go.Figure(go.Bar(
+                    x=[v for _, v in fake_words],
+                    y=[w for w, _ in fake_words],
+                    orientation='h',
+                    marker_color='#e63946'
+                ))
+                fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=10), xaxis_title="Weight")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No strong FAKE word indicators found.")
 
-    with col_real:
-        st.markdown("##### 🟢 Words pushing toward REAL")
-        if real_words:
-            fig = go.Figure(go.Bar(
-                x=[abs(v) for _, v in real_words],
-                y=[w for w, _ in real_words],
-                orientation='h',
-                marker_color='#2a9d8f'
-            ))
-            fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=10), xaxis_title="Weight")
-            st.plotly_chart(fig, use_container_width=True)
-        else:
-            st.info("No strong REAL word indicators found.")
+        with col_real:
+            st.markdown("##### 🟢 Words pushing toward REAL")
+            if real_words:
+                fig = go.Figure(go.Bar(
+                    x=[abs(v) for _, v in real_words],
+                    y=[w for w, _ in real_words],
+                    orientation='h',
+                    marker_color='#2a9d8f'
+                ))
+                fig.update_layout(height=300, margin=dict(l=0, r=0, t=10, b=10), xaxis_title="Weight")
+                st.plotly_chart(fig, use_container_width=True)
+            else:
+                st.info("No strong REAL word indicators found.")
 
-    st.markdown("##### 📝 Highlighted Headline")
-    st.components.v1.html(exp.as_html(), height=200, scrolling=True)
+        st.markdown("##### 📝 Highlighted Headline")
+        st.components.v1.html(exp.as_html(), height=200, scrolling=True)
+
+    except Exception as e:
+        st.warning(f"⚠️ LIME explanation unavailable: {e}")
 
     # --- Groq Explanation ---
     st.markdown("---")
     st.subheader("🤖 AI Explanation")
 
     with st.spinner("Generating AI explanation via Groq..."):
-        groq_explanation = get_groq_explanation(
-            headline=text,
-            prediction=label,
-            confidence=prob if prob >= 0.5 else 1 - prob,
-            lime_words=word_weights,
-            has_image=has_image
-        )
-
-    st.markdown(
-        f"""
-        <div style='
-            background: {banner_color}18;
-            border-left: 4px solid {banner_color};
-            padding: 15px;
-            border-radius: 8px;
-            font-size: 15px;
-            line-height: 1.6;
-        '>
-            {groq_explanation}
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        try:
+            groq_explanation = get_groq_explanation(
+                headline=text,
+                prediction=label,
+                confidence=prob if prob >= 0.5 else 1 - prob,
+                lime_words=word_weights,
+                has_image=has_image
+            )
+            st.markdown(
+                f"""
+                <div style='
+                    background: {banner_color}18;
+                    border-left: 4px solid {banner_color};
+                    padding: 15px;
+                    border-radius: 8px;
+                    font-size: 15px;
+                    line-height: 1.6;
+                '>
+                    {groq_explanation}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+        except Exception as e:
+            st.warning("⚠️ AI Explanation unavailable. Check your GROQ_API_KEY secret in HF Settings.")
+            st.caption(f"Error detail: {e}")
 
     # Save to session state for expert mode
     st.session_state.analysis_done = True
